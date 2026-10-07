@@ -9,7 +9,7 @@ import requests
 
 TOKEN = os.environ["TELEGRAM_BOT_TOKEN"]
 CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID", "@academymehrdad")
-CHANNEL_TAG = "@academymehrdad"
+CHANNEL_TAG = "@academymehrdadT"
 
 FEED_URL = "https://nfs.faireconomy.media/ff_calendar_thisweek.json"
 TEHRAN = ZoneInfo("Asia/Tehran")
