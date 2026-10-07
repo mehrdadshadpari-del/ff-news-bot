@@ -8,7 +8,7 @@ from zoneinfo import ZoneInfo
 import requests
 
 TOKEN = os.environ["TELEGRAM_BOT_TOKEN"]
-CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID", "@academymehrdad")
+CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID", "@academymehrdadt")
 CHANNEL_TAG = "@academymehrdadT"
 
 FEED_URL = "https://nfs.faireconomy.media/ff_calendar_thisweek.json"
