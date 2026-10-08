@@ -32,6 +32,17 @@ SYMBOLS = {
 
 # ترجمه‌ی دستی چند خبر پرتکرار (برای دقت بیشتر). بقیه با مترجم خودکار ترجمه می‌شوند.
 DICT = {
+    "BOE Gov Bailey Speaks": "سخنرانی بیلی (رئیس بانک مرکزی انگلستان)",
+    "BOJ Gov Ueda Speaks": "سخنرانی اوئدا (رئیس بانک مرکزی ژاپن)",
+    "BOC Gov Macklem Speaks": "سخنرانی مکلم (رئیس بانک مرکزی کانادا)",
+    "RBA Gov Bullock Speaks": "سخنرانی بولاک (رئیس بانک مرکزی استرالیا)",
+    "RBNZ Gov Breman Speaks": "سخنرانی برمن (رئیس بانک مرکزی نیوزیلند)",
+    "SNB Chairman Schlegel Speaks": "سخنرانی اشلگل (رئیس بانک مرکزی سوئیس)",
+    "FOMC Member Waller Speaks": "سخنرانی والر (عضو فدرال رزرو)",
+    "ECB Monetary Policy Meeting Accounts": "صورتجلسه سیاست پولی بانک مرکزی اروپا",
+    "Average Hourly Earnings m/m": "میانگین دستمزد ساعتی ماهانه",
+    "PPI m/m": "شاخص قیمت تولیدکننده (PPI) ماهانه",
+    "Core PPI m/m": "PPI هسته ماهانه",
     "Non-Farm Employment Change": "تغییر اشتغال غیرکشاورزی (NFP)",
     "Unemployment Rate": "نرخ بیکاری",
     "CPI m/m": "شاخص قیمت مصرف‌کننده (CPI) ماهانه",
@@ -116,7 +127,7 @@ def fetch_events():
                 "time": t,
                 "currency": e.get("country", ""),
                 "title": e.get("title", ""),
-                "impact": e.get("impact", ""),
+                "impact": "High" if (e.get("impact") == "High" or (e.get("impact") == "Medium" and e.get("country") == "USD")) else e.get("impact", ""),
             }
         )
     return events
@@ -195,32 +206,3 @@ def main():
         todays = sorted((e for e in events if e["time"].date() == today), key=lambda e: e["time"])
         send(morning_text(todays))
         state["morning_sent"] = today.isoformat()
-        save_state(state)
-
-    # 2) هشدار یک ساعت قبل از هر خبر مهم (فقط یک بار)
-    for e in sorted(events, key=lambda e: e["time"]):
-        if e["impact"] != "High":
-            continue
-        if now < e["time"] <= now + ALERT_BEFORE and e["id"] not in state["alerts"]:
-            send(alert_text(e))
-            state["alerts"].append(e["id"])
-            save_state(state)
-
-    # 3) هشدار در زمان خود خبر (فقط یک بار)
-    for e in sorted(events, key=lambda e: e["time"]):
-        if e["impact"] != "High":
-            continue
-        if e["time"] <= now < e["time"] + ALERT_NOW_WINDOW and e["id"] not in state["alerts_now"]:
-            send(alert_now_text(e))
-            state["alerts_now"].append(e["id"])
-            save_state(state)
-
-    # پاک‌سازی خبرهای هفته‌های قبل از فایل وضعیت
-    current_ids = {e["id"] for e in events}
-    state["alerts"] = [i for i in state["alerts"] if i in current_ids]
-    state["alerts_now"] = [i for i in state["alerts_now"] if i in current_ids]
-    save_state(state)
-
-
-if __name__ == "__main__":
-    main()
