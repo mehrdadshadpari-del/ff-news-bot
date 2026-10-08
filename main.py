@@ -8,16 +8,17 @@ from zoneinfo import ZoneInfo
 import requests
 
 TOKEN = os.environ["TELEGRAM_BOT_TOKEN"]
-CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID", "@academymehrdadt")
+CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID", "@academymehrdadT")
 CHANNEL_TAG = "@academymehrdadT"
 
 FEED_URL = "https://nfs.faireconomy.media/ff_calendar_thisweek.json"
 TEHRAN = ZoneInfo("Asia/Tehran")
 STATE_FILE = "state.json"
 
-MORNING_START_HOUR = 8   # از این ساعت (به وقت تهران) پیام صبحگاهی ارسال می‌شود
+MORNING_START_HOUR = 9   # از این ساعت (به وقت تهران) پیام صبحگاهی ارسال می‌شود
 MORNING_END_HOUR = 12    # بعد از این ساعت دیگر پیام صبحگاهی ارسال نمی‌شود
 ALERT_BEFORE = timedelta(minutes=60)
+ALERT_NOW_WINDOW = timedelta(minutes=15)  # هشدار «زمان خبر» تا ۱۵ دقیقه بعد از زمان خبر هم ارسال می‌شود
 
 FLAGS = {
     "USD": "🇺🇸", "EUR": "🇪🇺", "GBP": "🇬🇧", "JPY": "🇯🇵",
@@ -89,6 +90,7 @@ def load_state():
         state = {}
     state.setdefault("morning_sent", "")
     state.setdefault("alerts", [])
+    state.setdefault("alerts_now", [])
     return state
 
 
@@ -163,6 +165,16 @@ def alert_text(e):
     )
 
 
+def alert_now_text(e):
+    return (
+        "🔔 <b>زمان خبر مهم رسید</b>\n\n"
+        f"{cur_line(e['currency'])}\n"
+        f"{html.escape(to_fa(e['title']))}\n"
+        f"⏰ ساعت {e['time']:%H:%M} به وقت تهران (همین الان)\n\n"
+        f"{CHANNEL_TAG}"
+    )
+
+
 def main():
     now = datetime.now(TEHRAN)
     try:
@@ -190,9 +202,19 @@ def main():
             state["alerts"].append(e["id"])
             save_state(state)
 
+    # 3) هشدار در زمان خود خبر (فقط یک بار)
+    for e in sorted(events, key=lambda e: e["time"]):
+        if e["impact"] != "High":
+            continue
+        if e["time"] <= now < e["time"] + ALERT_NOW_WINDOW and e["id"] not in state["alerts_now"]:
+            send(alert_now_text(e))
+            state["alerts_now"].append(e["id"])
+            save_state(state)
+
     # پاک‌سازی خبرهای هفته‌های قبل از فایل وضعیت
     current_ids = {e["id"] for e in events}
     state["alerts"] = [i for i in state["alerts"] if i in current_ids]
+    state["alerts_now"] = [i for i in state["alerts_now"] if i in current_ids]
     save_state(state)
 
 
