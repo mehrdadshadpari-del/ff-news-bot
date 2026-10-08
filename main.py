@@ -2,6 +2,7 @@ import html
 import json
 import os
 import sys
+import time
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
@@ -74,6 +75,7 @@ def to_fa(title):
     try:
         from deep_translator import GoogleTranslator
 
+        time.sleep(0.5)  # برای اینکه مترجم به‌خاطر درخواست زیاد بلاک نکند
         fa = GoogleTranslator(source="en", target="fa").translate(title)
         _tr_cache[title] = fa or title
     except Exception as exc:  # اگر مترجم کار نکرد، عنوان انگلیسی ارسال می‌شود
@@ -131,6 +133,8 @@ def send(text):
         },
         timeout=30,
     )
+    if not r.ok:
+        print("TELEGRAM ERROR:", r.status_code, r.text)
     r.raise_for_status()
 
 
