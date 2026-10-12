@@ -19,7 +19,7 @@ TEHRAN = ZoneInfo("Asia/Tehran")
 STATE_FILE = "state.json"
 
 MORNING_START_HOUR = 7    # از این ساعت (به وقت تهران) پیام صبحگاهی ارسال می‌شود
-MORNING_END_HOUR = 14     # بعد از این ساعت دیگر پیام صبحگاهی ارسال نمی‌شود
+MORNING_END_HOUR = 16     # بعد از این ساعت دیگر پیام صبحگاهی ارسال نمی‌شود
 ALERT_BEFORE = timedelta(minutes=60)
 ALERT_NOW_WINDOW = timedelta(minutes=15)  # هشدار «زمان خبر» تا ۱۵ دقیقه بعد از زمان خبر
 SEND_NOW_ALERT = True  # اگه نمی‌خوای پیام «زمان خبر رسید» بره، False کن
