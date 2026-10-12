@@ -8,6 +8,8 @@ from zoneinfo import ZoneInfo
 
 import requests
 
+VERSION = "v3"
+
 TOKEN = os.environ["TELEGRAM_BOT_TOKEN"]
 CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID", "@academymehrdadT")
 CHANNEL_TAG = "@academymehrdadT"
@@ -16,10 +18,12 @@ FEED_URL = "https://nfs.faireconomy.media/ff_calendar_thisweek.json"
 TEHRAN = ZoneInfo("Asia/Tehran")
 STATE_FILE = "state.json"
 
-MORNING_START_HOUR = 0   # از این ساعت (به وقت تهران) پیام صبحگاهی ارسال می‌شود
-MORNING_END_HOUR = 24    # بعد از این ساعت دیگر پیام صبحگاهی ارسال نمی‌شود
+# فعلاً برای تست بازه باز است. بعد از تست بذار 8 و 12
+MORNING_START_HOUR = 0
+MORNING_END_HOUR = 24
 ALERT_BEFORE = timedelta(minutes=60)
-ALERT_NOW_WINDOW = timedelta(minutes=15)  # هشدار «زمان خبر» تا ۱۵ دقیقه بعد از زمان خبر هم ارسال می‌شود
+ALERT_NOW_WINDOW = timedelta(minutes=15)  # هشدار «زمان خبر» تا ۱۵ دقیقه بعد از زمان خبر
+SEND_NOW_ALERT = True  # اگه نمی‌خوای پیام «زمان خبر رسید» بره، False کن
 
 FLAGS = {
     "USD": "🇺🇸", "EUR": "🇪🇺", "GBP": "🇬🇧", "JPY": "🇯🇵",
@@ -30,7 +34,7 @@ SYMBOLS = {
     "AUD": "A$", "CAD": "C$", "NZD": "NZ$", "CHF": "₣", "CNY": "¥",
 }
 
-# ترجمه‌ی دستی چند خبر پرتکرار (برای دقت بیشتر). بقیه با مترجم خودکار ترجمه می‌شوند.
+# ترجمه‌ی دستی چند خبر پرتکرار. بقیه با مترجم خودکار ترجمه می‌شوند.
 DICT = {
     "BOE Gov Bailey Speaks": "سخنرانی بیلی (رئیس بانک مرکزی انگلستان)",
     "BOJ Gov Ueda Speaks": "سخنرانی اوئدا (رئیس بانک مرکزی ژاپن)",
@@ -77,7 +81,106 @@ DICT = {
 
 _tr_cache = {}
 
-SEND_NOW_ALERT = True  # اگه نمی‌خوای پیام «زمان خبر رسید» بره، False کن
+
+def to_fa(title):
+    if title in DICT:
+        return DICT[title]
+    if title in _tr_cache:
+        return _tr_cache[title]
+    try:
+        from deep_translator import GoogleTranslator
+
+        time.sleep(0.5)  # برای اینکه مترجم به‌خاطر درخواست زیاد بلاک نکند
+        fa = GoogleTranslator(source="en", target="fa").translate(title)
+        _tr_cache[title] = fa or title
+    except Exception as exc:  # اگر مترجم کار نکرد، عنوان انگلیسی ارسال می‌شود
+        print(f"translate failed for {title!r}: {exc}", file=sys.stderr)
+        _tr_cache[title] = title
+    return _tr_cache[title]
+
+
+def load_state():
+    try:
+        with open(STATE_FILE, encoding="utf-8") as f:
+            state = json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError):
+        state = {}
+    state.setdefault("morning_sent", "")
+    state.setdefault("alerts", [])
+    state.setdefault("alerts_now", [])
+    return state
+
+
+def save_state(state):
+    with open(STATE_FILE, "w", encoding="utf-8") as f:
+        json.dump(state, f, ensure_ascii=False, indent=2)
+
+
+def fetch_events():
+    r = requests.get(FEED_URL, timeout=30, headers={"User-Agent": "Mozilla/5.0"})
+    r.raise_for_status()
+    events = []
+    for e in r.json():
+        try:
+            t = datetime.fromisoformat(e["date"]).astimezone(TEHRAN)
+        except Exception:
+            continue
+        events.append(
+            {
+                "id": f'{e["date"]}|{e.get("country", "")}|{e.get("title", "")}',
+                "time": t,
+                "currency": e.get("country", ""),
+                "title": e.get("title", ""),
+                "impact": "High" if (e.get("impact") == "High" or (e.get("impact") == "Medium" and e.get("country") == "USD")) else e.get("impact", ""),
+            }
+        )
+    return events
+
+
+def send(text):
+    r = requests.post(
+        f"https://api.telegram.org/bot{TOKEN}/sendMessage",
+        json={
+            "chat_id": CHAT_ID,
+            "text": text,
+            "parse_mode": "HTML",
+            "disable_web_page_preview": True,
+        },
+        timeout=30,
+    )
+    if not r.ok:
+        print("TELEGRAM ERROR:", r.status_code, r.text)
+    r.raise_for_status()
+
+
+def safe_send(text):
+    try:
+        send(text)
+        return True
+    except Exception as exc:
+        print(f"send failed: {exc}", file=sys.stderr)
+        return False
+
+
+def cur_line(cur):
+    return f"{FLAGS.get(cur, '🏳️')} {SYMBOLS.get(cur, '')} {cur}".replace("  ", " ")
+
+
+def morning_text(todays):
+    high = [e for e in todays if e["impact"] == "High"]
+    if high:
+        lines = ["📅 <b>اخبار مهم امروز</b>", ""]
+        for e in high:
+            lines.append(
+                f"{cur_line(e['currency'])} | ⏰ {e['time']:%H:%M}\n"
+                f"{html.escape(to_fa(e['title']))}\n"
+            )
+        body = "\n".join(lines)
+    elif any(e["impact"] == "Holiday" for e in todays):
+        body = "امروز تعطیله و خبری نیست"
+    else:
+        body = "امروز خبر مهمی نداریم 🤲🏻"
+    return f"{body}\n\n{CHANNEL_TAG}"
 
 
 def group_by_time(events):
@@ -113,18 +216,9 @@ def alert_now_text(group):
     return "\n".join(lines)
 
 
-def safe_send(text):
-    try:
-        send(text)
-        return True
-    except Exception as exc:
-        print(f"send failed: {exc}", file=sys.stderr)
-        return False
-
-
 def main():
     now = datetime.now(TEHRAN)
-    print(f"[{now:%Y-%m-%d %H:%M}] شروع اجرا")
+    print(f"main.py {VERSION} | {now:%Y-%m-%d %H:%M} تهران | بازه صبحگاهی {MORNING_START_HOUR}-{MORNING_END_HOUR}")
     try:
         events = fetch_events()
     except Exception as exc:
@@ -134,7 +228,7 @@ def main():
     state = load_state()
     today = now.date()
     important = [e for e in events if e["impact"] == "High"]
-    print(f"کل رویدادها: {len(events)} | خبر مهم: {len(important)}")
+    print(f"کل رویدادها: {len(events)} | خبر مهم: {len(important)} | morning_sent قبلی: {state['morning_sent']!r}")
 
     # 1) پیام صبحگاهی (یک بار در روز)
     if state["morning_sent"] != today.isoformat() and MORNING_START_HOUR <= now.hour < MORNING_END_HOUR:
