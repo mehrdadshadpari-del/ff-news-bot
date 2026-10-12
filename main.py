@@ -8,7 +8,7 @@ from zoneinfo import ZoneInfo
 
 import requests
 
-VERSION = "v3"
+VERSION = "v4"
 
 TOKEN = os.environ["TELEGRAM_BOT_TOKEN"]
 CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID", "@academymehrdadT")
@@ -18,12 +18,14 @@ FEED_URL = "https://nfs.faireconomy.media/ff_calendar_thisweek.json"
 TEHRAN = ZoneInfo("Asia/Tehran")
 STATE_FILE = "state.json"
 
-# فعلاً برای تست بازه باز است. بعد از تست بذار 8 و 12
-MORNING_START_HOUR = 8
-MORNING_END_HOUR = 12
+MORNING_START_HOUR = 8    # از این ساعت (به وقت تهران) پیام صبحگاهی ارسال می‌شود
+MORNING_END_HOUR = 12     # بعد از این ساعت دیگر پیام صبحگاهی ارسال نمی‌شود
 ALERT_BEFORE = timedelta(minutes=60)
 ALERT_NOW_WINDOW = timedelta(minutes=15)  # هشدار «زمان خبر» تا ۱۵ دقیقه بعد از زمان خبر
 SEND_NOW_ALERT = True  # اگه نمی‌خوای پیام «زمان خبر رسید» بره، False کن
+
+# برای تست پیام شنبه/یکشنبه: عدد 5 (شنبه) یا 6 (یکشنبه) بذار. بعد از تست دوباره None
+TEST_WEEKDAY = None
 
 FLAGS = {
     "USD": "🇺🇸", "EUR": "🇪🇺", "GBP": "🇬🇧", "JPY": "🇯🇵",
@@ -79,6 +81,43 @@ DICT = {
     "Crude Oil Inventories": "ذخایر نفت خام",
 }
 
+# ---------- تاریخ شمسی و روز هفته ----------
+PERSIAN_DIGITS = str.maketrans("0123456789", "۰۱۲۳۴۵۶۷۸۹")
+JALALI_MONTHS = [
+    "فروردین", "اردیبهشت", "خرداد", "تیر", "مرداد", "شهریور",
+    "مهر", "آبان", "آذر", "دی", "بهمن", "اسفند",
+]
+# ترتیب پایتون: دوشنبه=0 ... شنبه=5، یکشنبه=6
+FA_WEEKDAYS = ["دوشنبه", "سه‌شنبه", "چهارشنبه", "پنجشنبه", "جمعه", "شنبه", "یکشنبه"]
+
+
+def gregorian_to_jalali(gy, gm, gd):
+    g_d_m = [0, 31, 59, 90, 120, 151, 181, 212, 243, 273, 304, 334]
+    gy2 = gy + 1 if gm > 2 else gy
+    days = (355666 + (365 * gy) + ((gy2 + 3) // 4) - ((gy2 + 99) // 100)
+            + ((gy2 + 399) // 400) + gd + g_d_m[gm - 1])
+    jy = -1595 + (33 * (days // 12053))
+    days %= 12053
+    jy += 4 * (days // 1461)
+    days %= 1461
+    if days > 365:
+        jy += (days - 1) // 365
+        days = (days - 1) % 365
+    if days < 186:
+        jm = 1 + days // 31
+        jd = 1 + days % 31
+    else:
+        jm = 7 + (days - 186) // 30
+        jd = 1 + (days - 186) % 30
+    return jy, jm, jd
+
+
+def fa_date(d):
+    jy, jm, jd = gregorian_to_jalali(d.year, d.month, d.day)
+    return f"{jd} {JALALI_MONTHS[jm - 1]} {jy}".translate(PERSIAN_DIGITS)
+
+
+# ---------- ترجمه ----------
 _tr_cache = {}
 
 
@@ -99,6 +138,7 @@ def to_fa(title):
     return _tr_cache[title]
 
 
+# ---------- ذخیره وضعیت ----------
 def load_state():
     try:
         with open(STATE_FILE, encoding="utf-8") as f:
@@ -116,6 +156,7 @@ def save_state(state):
         json.dump(state, f, ensure_ascii=False, indent=2)
 
 
+# ---------- گرفتن اخبار ----------
 def fetch_events():
     r = requests.get(FEED_URL, timeout=30, headers={"User-Agent": "Mozilla/5.0"})
     r.raise_for_status()
@@ -137,6 +178,7 @@ def fetch_events():
     return events
 
 
+# ---------- ارسال به تلگرام ----------
 def send(text):
     r = requests.post(
         f"https://api.telegram.org/bot{TOKEN}/sendMessage",
@@ -162,14 +204,22 @@ def safe_send(text):
         return False
 
 
+# ---------- ساخت پیام‌ها ----------
 def cur_line(cur):
     return f"{FLAGS.get(cur, '🏳️')} {SYMBOLS.get(cur, '')} {cur}".replace("  ", " ")
 
 
-def morning_text(todays):
+def morning_text(todays, today, weekday):
+    header = (
+        f"📅 <b>اخبار مهم امروز ({FA_WEEKDAYS[weekday]} {fa_date(today)}) "
+        f"فارکس فکتوری در آکادمی مهرداد</b>"
+    )
     high = [e for e in todays if e["impact"] == "High"]
-    if high:
-        lines = ["📅 <b>اخبار مهم امروز</b>", ""]
+
+    if weekday in (5, 6):  # شنبه یا یکشنبه
+        body = f"{header}\n\nامروز تعطیله و خبر نداریم ترید هم نداریم 😂"
+    elif high:
+        lines = [header, ""]
         for e in high:
             lines.append(
                 f"{cur_line(e['currency'])} | ⏰ {e['time']:%H:%M}\n"
@@ -177,9 +227,9 @@ def morning_text(todays):
             )
         body = "\n".join(lines)
     elif any(e["impact"] == "Holiday" for e in todays):
-        body = "امروز تعطیله و خبری نیست"
+        body = f"{header}\n\nامروز تعطیله و خبری نیست"
     else:
-        body = "امروز خبر مهمی نداریم 🤲🏻"
+        body = f"{header}\n\nامروز خبر مهمی توی فارکس فکتوری نبود 🤲🏻"
     return f"{body}\n\n{CHANNEL_TAG}"
 
 
@@ -216,9 +266,15 @@ def alert_now_text(group):
     return "\n".join(lines)
 
 
+# ---------- منطق اصلی ----------
 def main():
     now = datetime.now(TEHRAN)
-    print(f"main.py {VERSION} | {now:%Y-%m-%d %H:%M} تهران | بازه صبحگاهی {MORNING_START_HOUR}-{MORNING_END_HOUR}")
+    today = now.date()
+    weekday = TEST_WEEKDAY if TEST_WEEKDAY is not None else today.weekday()
+    print(
+        f"main.py {VERSION} | {now:%Y-%m-%d %H:%M} تهران | روز هفته: {FA_WEEKDAYS[weekday]} "
+        f"| بازه صبحگاهی {MORNING_START_HOUR}-{MORNING_END_HOUR}"
+    )
     try:
         events = fetch_events()
     except Exception as exc:
@@ -226,14 +282,16 @@ def main():
         return
 
     state = load_state()
-    today = now.date()
     important = [e for e in events if e["impact"] == "High"]
-    print(f"کل رویدادها: {len(events)} | خبر مهم: {len(important)} | morning_sent قبلی: {state['morning_sent']!r}")
+    print(
+        f"کل رویدادها: {len(events)} | خبر مهم: {len(important)} "
+        f"| morning_sent قبلی: {state['morning_sent']!r}"
+    )
 
     # 1) پیام صبحگاهی (یک بار در روز)
     if state["morning_sent"] != today.isoformat() and MORNING_START_HOUR <= now.hour < MORNING_END_HOUR:
         todays = sorted((e for e in events if e["time"].date() == today), key=lambda e: e["time"])
-        if safe_send(morning_text(todays)):
+        if safe_send(morning_text(todays, today, weekday)):
             state["morning_sent"] = today.isoformat()
             print("پیام صبحگاهی ارسال شد")
     else:
